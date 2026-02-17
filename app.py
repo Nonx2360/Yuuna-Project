@@ -1,9 +1,11 @@
 import os
 import torch
-from flask import Flask, request, jsonify, render_template
+import time
+from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 from peft import PeftModel
+from threading import Thread
 
 app = Flask(__name__)
 CORS(app)
@@ -11,7 +13,6 @@ CORS(app)
 # ============================================
 # Configuration
 # ============================================
-# Note: Paths are updated to be within the project directory or accessible paths
 BASE_MODEL_PATH = r"c:\Users\Nonx2\Downloads\Yuuna-Project\Qwen2.5-1.5B-Instruct"
 LORA_PATH = r"c:\Users\Nonx2\Downloads\Yuuna-Project\Lora"
 
@@ -34,9 +35,9 @@ Remember: You are here to be a friend, listener, and source of comfort. Always r
 model = None
 tokenizer = None
 
-def load_model():
+def load_yuna():
     global model, tokenizer
-    print(f"Loading Tuned_AI on {DEVICE}...")
+    print(f"Loading Yuna-chan on {DEVICE}...")
     
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_PATH, trust_remote_code=True)
     if tokenizer.pad_token is None:
@@ -55,7 +56,7 @@ def load_model():
         model = model.to(DEVICE)
         
     model.eval()
-    print("✅ Tuned_AI is ready!")
+    print("✅ Yuna-chan is ready!")
 
 @app.route('/')
 def index():
@@ -84,25 +85,37 @@ def chat():
     
     inputs = tokenizer(text, return_tensors="pt").to(model.device)
     
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=512,
-            temperature=0.7,
-            top_p=0.9,
-            top_k=50,
-            repetition_penalty=1.1,
-            do_sample=True,
-            pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-        )
+    streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     
-    generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
-    response = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-    
-    return jsonify({"response": response})
+    generation_kwargs = dict(
+        **inputs,
+        streamer=streamer,
+        max_new_tokens=512,
+        temperature=0.7,
+        top_p=0.9,
+        top_k=50,
+        repetition_penalty=1.1,
+        do_sample=True,
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+    )
+
+    def generate():
+        start_time = time.time()
+        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread.start()
+        
+        for new_text in streamer:
+            yield new_text
+            
+        end_time = time.time()
+        duration = round(end_time - start_time, 2)
+        # Yield the duration at the end in a special format
+        yield f"\n__DURATION__{duration}"
+
+    return Response(generate(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
     # Initial load
-    load_model()
+    load_yuna()
     app.run(host='0.0.0.0', port=5000)

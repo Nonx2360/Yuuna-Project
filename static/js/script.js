@@ -1,73 +1,129 @@
-const chatWindow = document.getElementById('chat-window');
-const userInput = document.getElementById('user-input');
-const sendBtn = document.getElementById('send-btn');
+const display = document.getElementById('message-display');
+const input = document.getElementById('user-input');
+const btn = document.getElementById('send-btn');
+const hero = document.getElementById('hero-section');
 
 let messageHistory = [];
 
-function appendMessage(role, content) {
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `msg ${role}`;
+// Auto-resize textarea
+input.addEventListener('input', function () {
+    this.style.height = 'auto';
+    this.style.height = (this.scrollHeight) + 'px';
+});
+
+function appendMessage(role, content, duration = null) {
+    // Hide hero if it's the first message
+    if (hero) {
+        display.classList.add('has-messages');
+    }
+
+    const row = document.createElement('div');
+    row.className = `message-row ${role}`;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    if (role === 'user') {
+        avatar.innerHTML = `<img src="/static/img/userProfile.jpg" alt="U">`;
+    } else {
+        avatar.innerText = role === 'assistant' ? 'G' : 'S';
+    }
+
+    const textDiv = document.createElement('div');
+    textDiv.className = 'text';
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.textContent = content;
 
-    msgDiv.appendChild(bubble);
-    chatWindow.appendChild(msgDiv);
+    if (role === 'user' || role === 'system') {
+        bubble.textContent = content;
+    } else {
+        bubble.innerHTML = marked.parse(content);
+    }
 
-    // Scroll to bottom
-    chatWindow.scrollTop = chatWindow.scrollHeight;
+    textDiv.appendChild(bubble);
+
+    if (duration !== null) {
+        const timeDiv = document.createElement('div');
+        timeDiv.className = 'response-time';
+        timeDiv.textContent = `Response time: ${duration}s`;
+        textDiv.appendChild(timeDiv);
+    }
+
+    row.appendChild(avatar);
+    row.appendChild(textDiv);
+    display.appendChild(row);
+
+    display.scrollTop = display.scrollHeight;
+
+    return { row, bubble, textDiv };
 }
 
 async function sendMessage() {
-    const text = userInput.value.trim();
+    const text = input.value.trim();
     if (!text) return;
 
-    // Add user message to UI
     appendMessage('user', text);
-    userInput.value = '';
-
-    // Add to history
+    input.value = '';
+    input.style.height = 'auto'; // Reset height
     messageHistory.push({ role: 'user', content: text });
 
-    // Show typing placeholder (simulated)
-    const typingMsg = document.createElement('div');
-    typingMsg.className = 'msg assistant typing';
-    typingMsg.innerHTML = '<div class="bubble">...</div>';
-    chatWindow.appendChild(typingMsg);
-    chatWindow.scrollTop = chatWindow.scrollHeight;
+    const { bubble: assistantBubble, textDiv: assistantTextDiv } = appendMessage('assistant', '');
+    assistantBubble.textContent = '...';
+    display.scrollTop = display.scrollHeight;
 
     try {
         const response = await fetch('/api/chat', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: messageHistory })
         });
 
-        const data = await response.json();
+        if (!response.ok) throw new Error('Network response was not ok');
 
-        // Remove typing placeholder
-        chatWindow.removeChild(typingMsg);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullResponse = '';
+        let duration = null;
 
-        if (data.response) {
-            appendMessage('assistant', data.response);
-            messageHistory.push({ role: 'assistant', content: data.response });
-        } else if (data.error) {
-            appendMessage('system', `Error: ${data.error}`);
+        assistantBubble.textContent = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+
+            if (chunk.includes('__DURATION__')) {
+                const parts = chunk.split('__DURATION__');
+                fullResponse += parts[0];
+                duration = parts[1];
+
+                assistantBubble.innerHTML = marked.parse(fullResponse.trim());
+
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'response-time';
+                timeDiv.textContent = `Response time: ${duration}s`;
+                assistantTextDiv.appendChild(timeDiv);
+            } else {
+                fullResponse += chunk;
+                assistantBubble.innerHTML = marked.parse(fullResponse);
+            }
+
+            display.scrollTop = display.scrollHeight;
         }
+
+        messageHistory.push({ role: 'assistant', content: fullResponse.trim() });
+
     } catch (error) {
-        chatWindow.removeChild(typingMsg);
-        appendMessage('system', 'Sorry, I couldn\'t reach the server.');
         console.error('Fetch error:', error);
+        assistantBubble.textContent = 'Error: Could not connect to the server.';
     }
 }
 
-sendBtn.addEventListener('click', sendMessage);
-
-userInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
+btn.addEventListener('click', sendMessage);
+input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
         sendMessage();
     }
 });
