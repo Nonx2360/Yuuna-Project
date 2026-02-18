@@ -116,6 +116,14 @@ def chat():
     return Response(generate(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
-    # Initial load
-    load_yuna()
-    app.run(host='0.0.0.0', port=5000)
+    # Use environment variable check to prevent loading the model twice when using Flask's reloader
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        load_yuna()
+    elif not os.environ.get("WERKZEUG_RUN_MAIN"):
+        # This branch runs in the master process if not using reloader, 
+        # but we want to load it here too for standard runs without debug.
+        # However, if debug=True is set, it will start a child soon.
+        if not app.debug:
+            load_yuna()
+
+    app.run(host='0.0.0.0', port=5000, debug=True)

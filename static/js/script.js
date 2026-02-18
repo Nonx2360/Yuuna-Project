@@ -24,8 +24,10 @@ function appendMessage(role, content, duration = null) {
     avatar.className = 'avatar';
     if (role === 'user') {
         avatar.innerHTML = `<img src="/static/img/userProfile.jpg" alt="U">`;
+    } else if (role === 'assistant') {
+        avatar.innerHTML = `<img src="/static/img/gptProfile.png" alt="G">`;
     } else {
-        avatar.innerText = role === 'assistant' ? 'G' : 'S';
+        avatar.innerText = 'S';
     }
 
     const textDiv = document.createElement('div');
