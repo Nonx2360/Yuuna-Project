@@ -6,3 +6,4 @@ peft
 accelerate
 sentencepiece
 bitsandbytes
+requests

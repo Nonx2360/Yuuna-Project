@@ -1,6 +1,7 @@
 import os
 import torch
 import time
+import requests
 from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
@@ -61,6 +62,43 @@ def load_yuna():
 @app.route('/')
 def index():
     return render_template('index.html')
+
+VOICEVOX_URL = "http://localhost:50021"
+DEFAULT_SPEAKER_ID = 2 # Shikoku Metan (Normal)
+
+@app.route('/api/tts', methods=['POST'])
+def tts():
+    data = request.json
+    text = data.get('text', '')
+    speaker = data.get('speaker', DEFAULT_SPEAKER_ID)
+    
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+        
+    try:
+        # 1. audio_query
+        query_res = requests.post(
+            f"{VOICEVOX_URL}/audio_query",
+            params={"text": text, "speaker": speaker}
+        )
+        if query_res.status_code != 200:
+            return jsonify({"error": "VOICEVOX audio_query failed"}), 500
+            
+        # 2. synthesis
+        synth_res = requests.post(
+            f"{VOICEVOX_URL}/synthesis",
+            params={"speaker": speaker},
+            json=query_res.json()
+        )
+        if synth_res.status_code != 200:
+            return jsonify({"error": "VOICEVOX synthesis failed"}), 500
+            
+        return Response(synth_res.content, mimetype='audio/wav')
+        
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "VOICEVOX engine is not running. Please start VOICEVOX on port 50021."}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
