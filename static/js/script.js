@@ -203,3 +203,32 @@ input.addEventListener('keydown', (e) => {
         sendMessage();
     }
 });
+
+// Sidebar Toggle for Mobile
+const menuToggle = document.getElementById('menu-toggle');
+const sidebar = document.querySelector('.sidebar');
+const sidebarOverlay = document.getElementById('sidebar-overlay');
+
+function toggleSidebar() {
+    sidebar.classList.toggle('open');
+    if (sidebarOverlay) sidebarOverlay.classList.toggle('active');
+}
+
+if (menuToggle) {
+    menuToggle.addEventListener('click', toggleSidebar);
+}
+
+if (sidebarOverlay) {
+    sidebarOverlay.addEventListener('click', toggleSidebar);
+}
+
+// Close sidebar when clicking 'New Chat' on mobile
+const newChatBtn = document.querySelector('.new-chat-btn');
+if (newChatBtn) {
+    newChatBtn.addEventListener('click', () => {
+        if (window.innerWidth <= 768) {
+            sidebar.classList.remove('open');
+            if (sidebarOverlay) sidebarOverlay.classList.remove('active');
+        }
+    });
+}
