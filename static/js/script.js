@@ -4,9 +4,34 @@ const btn = document.getElementById('send-btn');
 const hero = document.getElementById('hero-section');
 const ttsToggle = document.getElementById('tts-toggle');
 const moodSelector = document.getElementById('mood-selector');
+const modelSelector = document.querySelector('.model-selector'); // Select class instead of ID
+
+// Modal Elements
+const charModal = document.getElementById('character-modal');
+const closeModal = document.querySelector('.close-modal');
+const charListContainer = document.querySelector('.character-list-container');
+const createCharForm = document.getElementById('create-char-form');
+const charList = document.getElementById('character-list');
+const createCharBtn = document.getElementById('create-char-btn');
+const cancelCreateBtn = document.getElementById('cancel-create-btn');
+const saveCharBtn = document.getElementById('save-char-btn');
+const generatePromptBtn = document.getElementById('generate-prompt-btn');
+
+// Form Inputs
+const charNameInput = document.getElementById('char-name');
+const charDescInput = document.getElementById('char-desc');
+const charGenPromptInput = document.getElementById('char-gen-prompt');
+const charPromptInput = document.getElementById('char-prompt');
 
 let messageHistory = [];
 let currentAudio = null;
+let currentCharacter = null;
+let characters = [];
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    loadCharacters();
+});
 
 // Auto-resize textarea
 input.addEventListener('input', function () {
@@ -55,10 +80,13 @@ function appendMessage(role, content, duration = null) {
 
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
+
     if (role === 'user') {
         avatar.innerHTML = `<img src="/static/img/userProfile.jpg" alt="U">`;
     } else if (role === 'assistant') {
-        avatar.innerHTML = `<img src="/static/img/gptProfile.png" alt="G">`;
+        // Use current character avatar if available
+        const avatarSrc = currentCharacter ? currentCharacter.avatar : "/static/img/gptProfile.png";
+        avatar.innerHTML = `<img src="${avatarSrc}" alt="AI" onerror="this.src='/static/img/gptProfile.png'">`;
     } else {
         avatar.innerText = 'S';
     }
@@ -142,10 +170,16 @@ async function sendMessage() {
     display.scrollTop = display.scrollHeight;
 
     try {
+        const payload = {
+            messages: messageHistory,
+            system_prompt: currentCharacter ? currentCharacter.system_prompt : undefined,
+            character_id: currentCharacter ? currentCharacter.id : 'default'
+        };
+
         const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: messageHistory })
+            body: JSON.stringify(payload)
         });
 
         if (!response.ok) throw new Error('Network response was not ok');
@@ -232,3 +266,214 @@ if (newChatBtn) {
         }
     });
 }
+
+// ============================================
+// Character Management Logic
+// ============================================
+
+async function loadCharacters() {
+    try {
+        const response = await fetch('/api/characters');
+        characters = await response.json();
+        renderCharacterList();
+
+        // Select default Character if none selected
+        if (!currentCharacter && characters.length > 0) {
+            selectCharacter(characters[0]);
+        }
+    } catch (error) {
+        console.error('Failed to load characters:', error);
+    }
+}
+
+function renderCharacterList() {
+    charList.innerHTML = '';
+    characters.forEach(char => {
+        const card = document.createElement('div');
+        card.className = `character-card ${currentCharacter && currentCharacter.id === char.id ? 'selected' : ''}`;
+
+        // Main Click to Select
+        card.onclick = (e) => {
+            // Prevent selection if delete button was clicked
+            if (e.target.closest('.delete-char-btn')) return;
+            selectCharacter(char);
+        };
+
+        let deleteBtnHtml = '';
+        if (char.id !== 'default') {
+            deleteBtnHtml = `
+                <button class="delete-char-btn" title="Delete Character" onclick="deleteCharacter(event, '${char.id}')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                </button>
+            `;
+        }
+
+        card.innerHTML = `
+            <img src="${char.avatar}" alt="${char.name}" class="char-avatar" onerror="this.src='/static/img/gptProfile.png'">
+            <div class="char-info">
+                <h3>${char.name}</h3>
+                <p>${char.description || 'No description'}</p>
+            </div>
+            ${deleteBtnHtml}
+        `;
+        charList.appendChild(card);
+    });
+}
+
+window.deleteCharacter = async function (event, charId) {
+    event.stopPropagation(); // Stop card selection
+
+    if (!confirm('Are you sure you want to delete this character?')) return;
+
+    try {
+        const response = await fetch(`/api/characters/${charId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            // If deleting current character, switch to default
+            if (currentCharacter && currentCharacter.id === charId) {
+                const defaultChar = characters.find(c => c.id === 'default');
+                selectCharacter(defaultChar);
+            }
+            loadCharacters(); // Refresh list
+        } else {
+            alert('Failed to delete character');
+        }
+    } catch (error) {
+        console.error('Error deleting character:', error);
+        alert('Error deleting character');
+    }
+};
+
+function selectCharacter(char) {
+    currentCharacter = char;
+
+    // Update UI
+    modelSelector.innerHTML = `${char.name} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>`;
+
+    // Update list selection highlight
+    Array.from(charList.children).forEach(child => child.classList.remove('selected'));
+    // Re-render to update selection class properly or just update DOM
+    renderCharacterList();
+
+    // Close modal
+    charModal.classList.remove('active');
+
+    // Clear chat if switching characters (optional, but good practice)
+    // display.innerHTML = ''; 
+    // messageHistory = [];
+    // if (hero) display.classList.add('has-messages'); // Or remove hero-section handling logic reset
+}
+
+// Modal handling
+modelSelector.addEventListener('click', () => {
+    charModal.classList.add('active');
+    loadCharacters(); // Refresh list
+});
+
+closeModal.addEventListener('click', () => {
+    charModal.classList.remove('active');
+    resetCreateForm();
+});
+
+window.addEventListener('click', (e) => {
+    if (e.target === charModal) {
+        charModal.classList.remove('active');
+        resetCreateForm();
+    }
+});
+
+// Create Character Logic
+createCharBtn.addEventListener('click', () => {
+    charListContainer.style.display = 'none';
+    createCharForm.style.display = 'block';
+});
+
+cancelCreateBtn.addEventListener('click', resetCreateForm);
+
+function resetCreateForm() {
+    createCharForm.style.display = 'none';
+    charListContainer.style.display = 'block';
+    charNameInput.value = '';
+    charDescInput.value = '';
+    charGenPromptInput.value = `Create a detailed system prompt for a character who is...
+[Describe personality, traits, and background here]
+
+The character should speak in a...
+[Describe speaking style here]
+
+Output only the system prompt.`;
+    charPromptInput.value = '';
+}
+
+generatePromptBtn.addEventListener('click', async () => {
+    const instruction = charGenPromptInput.value.trim();
+    if (!instruction) {
+        alert('Please enter generation instructions.');
+        return;
+    }
+
+    generatePromptBtn.disabled = true;
+    generatePromptBtn.innerHTML = 'Generating...';
+
+    try {
+        const response = await fetch('/api/generate_prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instruction })
+        });
+
+        const data = await response.json();
+        if (data.system_prompt) {
+            charPromptInput.value = data.system_prompt;
+        } else {
+            alert('Failed to generate prompt: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error generating prompt:', error);
+        alert('Error generating prompt');
+    } finally {
+        generatePromptBtn.disabled = false;
+        generatePromptBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg> Generate with Yuuna';
+    }
+});
+
+saveCharBtn.addEventListener('click', async () => {
+    const name = charNameInput.value.trim();
+    const system_prompt = charPromptInput.value.trim();
+    const description = charDescInput.value.trim();
+
+    if (!name || !system_prompt) {
+        alert('Name and System Prompt are required.');
+        return;
+    }
+
+    saveCharBtn.disabled = true;
+
+    try {
+        const response = await fetch('/api/characters', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                system_prompt,
+                description,
+                avatar: 'static/img/gptProfile.png' // Default avatar for now
+            })
+        });
+
+        const newChar = await response.json();
+        characters.push(newChar);
+        selectCharacter(newChar);
+        resetCreateForm();
+
+    } catch (error) {
+        console.error('Error saving character:', error);
+        alert('Failed to save character');
+    } finally {
+        saveCharBtn.disabled = false;
+    }
+});

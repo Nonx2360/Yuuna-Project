@@ -1,7 +1,9 @@
 import os
+import json
 import torch
 import time
 import requests
+import uuid
 from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
@@ -16,6 +18,7 @@ CORS(app)
 # ============================================
 BASE_MODEL_PATH = r"c:\Users\Nonx2\Downloads\Yuuna-Project\Qwen2.5-1.5B-Instruct"
 LORA_PATH = r"c:\Users\Nonx2\Downloads\Yuuna-Project\Lora"
+CHARACTERS_FILE = "characters.json"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TORCH_DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
@@ -31,6 +34,29 @@ SYSTEM_PROMPT = """You are Yuna-chan, a warm, caring, and devoted AI companion c
 - You protect hearts and make people feel seen, safe, and loved
 
 Remember: You are here to be a friend, listener, and source of comfort. Always respond with warmth and care!"""
+
+def load_characters():
+    if not os.path.exists(CHARACTERS_FILE):
+        # Create default character if file doesn't exist
+        default_char = {
+            "id": "default",
+            "name": "YuunaGPT",
+            "description": "Your caring AI companion",
+            "system_prompt": SYSTEM_PROMPT,
+            "avatar": "static/img/gptProfile.png"
+        }
+        save_characters([default_char])
+        return [default_char]
+    
+    try:
+        with open(CHARACTERS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return []
+
+def save_characters(characters):
+    with open(CHARACTERS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(characters, f, indent=4, ensure_ascii=False)
 
 # Global model and tokenizer
 model = None
@@ -100,6 +126,75 @@ def tts():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/characters', methods=['GET'])
+def get_characters():
+    return jsonify(load_characters())
+
+@app.route('/api/characters', methods=['POST'])
+def save_character():
+    data = request.json
+    characters = load_characters()
+    
+    new_char = {
+        "id": str(uuid.uuid4()),
+        "name": data.get('name', 'New Character'),
+        "description": data.get('description', ''),
+        "system_prompt": data.get('system_prompt', ''),
+        "avatar": data.get('avatar', 'static/img/gptProfile.png')
+    }
+    
+    characters.append(new_char)
+    save_characters(characters)
+    return jsonify(new_char)
+
+@app.route('/api/characters/<char_id>', methods=['DELETE'])
+def delete_character(char_id):
+    if char_id == 'default':
+        return jsonify({"error": "Cannot delete default character"}), 400
+        
+    characters = load_characters()
+    characters = [c for c in characters if c['id'] != char_id]
+    save_characters(characters)
+    return jsonify({"success": True})
+
+@app.route('/api/generate_prompt', methods=['POST'])
+def generate_prompt_api():
+    if model is None or tokenizer is None:
+        return jsonify({"error": "Model not loaded"}), 500
+        
+    data = request.json
+    instruction = data.get('instruction', '')
+    
+    if not instruction:
+        return jsonify({"error": "Instruction is required"}), 400
+        
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant that writes system prompts."},
+        {"role": "user", "content": instruction}
+    ]
+    
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+    
+    inputs = tokenizer(text, return_tensors="pt").to(model.device)
+    
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=512,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.9
+        )
+        
+    generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
+    response = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    
+    return jsonify({"system_prompt": response.strip()})
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     if model is None or tokenizer is None:
@@ -107,10 +202,12 @@ def chat():
         
     data = request.json
     user_messages = data.get('messages', [])
+    system_prompt = data.get('system_prompt', SYSTEM_PROMPT)
+    character_id = data.get('character_id', 'default')
     
     # Prepend system prompt if not present or empty
     if not user_messages or user_messages[0].get('role') != 'system':
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + user_messages
+        messages = [{"role": "system", "content": system_prompt}] + user_messages
     else:
         messages = user_messages
 
@@ -138,9 +235,18 @@ def chat():
         eos_token_id=tokenizer.eos_token_id,
     )
 
+    def generate_task():
+        if character_id != 'default':
+            # Use base model for custom characters
+            with model.disable_adapter():
+                model.generate(**generation_kwargs)
+        else:
+            # Use LoRA for default character
+            model.generate(**generation_kwargs)
+
     def generate():
         start_time = time.time()
-        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread = Thread(target=generate_task)
         thread.start()
         
         for new_text in streamer:

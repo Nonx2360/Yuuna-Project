@@ -122,6 +122,68 @@
                 </div>
             </div>
         </main>
+        <!-- Character Selection Modal -->
+        <div id="character-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Select Character</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="character-list-container">
+                        <div id="character-list" class="character-grid">
+                            <!-- Characters will be populated here -->
+                        </div>
+                        <button id="create-char-btn" class="create-new-btn">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            Create New Character
+                        </button>
+                    </div>
+
+                    <div id="create-char-form" class="create-form" style="display: none;">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" id="char-name" placeholder="e.g., Pirate Captain">
+                        </div>
+                        <div class="form-group">
+                            <label>Short Description (for the list)</label>
+                            <input type="text" id="char-desc" placeholder="e.g., A grumpy pirate">
+                        </div>
+                        <div class="form-group">
+                            <label>Generation Instructions (Edit or copy to ChatGPT/Claude)</label>
+                            <div class="input-with-btn column-layout">
+                                <textarea id="char-gen-prompt" rows="4">Create a detailed system prompt for a character who is...
+[Describe personality, traits, and background here]
+
+The character should speak in a...
+[Describe speaking style here]
+
+Output only the system prompt.</textarea>
+                                <button id="generate-prompt-btn" class="ai-btn full-width">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+                                    </svg>
+                                    Generate with Yuuna
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>System Prompt</label>
+                            <textarea id="char-prompt" rows="6" placeholder="You are..."></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button id="cancel-create-btn" class="btn-secondary">Cancel</button>
+                            <button id="save-char-btn" class="btn-primary">Save Character</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
