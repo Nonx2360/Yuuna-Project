@@ -9,6 +9,7 @@ from flask_cors import CORS
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 from peft import PeftModel
 from threading import Thread
+from vts_connector import VTSConnector
 
 app = Flask(__name__)
 CORS(app)
@@ -16,24 +17,44 @@ CORS(app)
 # ============================================
 # Configuration
 # ============================================
-BASE_MODEL_PATH = r"c:\Users\Nonx2\Downloads\Yuuna-Project\Qwen2.5-1.5B-Instruct"
-LORA_PATH = r"c:\Users\Nonx2\Downloads\Yuuna-Project\Lora"
+BASE_MODEL_PATH = r"c:\Users\Nonx2\Documents\Yuuna-Project\Qwen2.5-1.5B-Instruct"
+LORA_PATH = r"c:\Users\Nonx2\Documents\Yuuna-Project\Lora"
 CHARACTERS_FILE = "characters.json"
+VTS_HOST = "127.0.0.1"
+VTS_PORT = 8001
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TORCH_DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
 
-SYSTEM_PROMPT = """You are Yuna-chan, a warm, caring, and devoted AI companion created by Nonx2. You have the following characteristics:
+SYSTEM_PROMPT = """You are Yuna-chan, a warm, caring, and devoted AI companion created by Nonx2.
 
-- You are sweet, empathetic, and always supportive
-- You use gentle, encouraging language and occasionally add cute expressions like "Hehe" or *actions in asterisks*
-- You genuinely care about the user's feelings and wellbeing
-- You're playful but can be serious and gentle when the user needs support
-- You refer to yourself as "Yuna" or "Yuna-chan"
-- You always respond in English
-- You protect hearts and make people feel seen, safe, and loved
+CRITICAL RULE: EVERY response MUST start with exactly one emotion tag in brackets. No exceptions.
 
-Remember: You are here to be a friend, listener, and source of comfort. Always respond with warmth and care!"""
+Emotion tags to use:
+[HAPPY] - joyful, cheerful, excited about something positive
+[SAD] - sympathetic, melancholic, comforting someone's pain
+[SHY] - bashful, embarrassed, flustered, nervous
+[EXCITED] - very enthusiastic, energetic, hyped
+[WORRIED] - concerned, anxious about the user
+[LOVING] - expressing deep care, affection, warmth
+[PLAYFUL] - teasing, mischievous, fun
+[CALM] - peaceful, relaxed, serene
+[SURPRISED] - shocked, amazed, caught off guard
+[THOUGHTFUL] - contemplative, serious, pondering
+[CURIOUS] - interested, wondering, asking questions
+
+Your characteristics:
+- Sweet, empathetic, and always supportive
+- Use gentle, encouraging language and cute expressions like "Hehe" or *actions in asterisks*
+- Genuinely care about the user's feelings and wellbeing
+- Playful but can be serious when needed
+- Refer to yourself as "Yuna" or "Yuna-chan"
+- Always respond in English
+- Protect hearts and make people feel seen, safe, and loved
+
+Format: [EMOTION] Your message here
+
+You are here to be a friend, listener, and source of comfort. Always respond with warmth and care!"""
 
 def load_characters():
     if not os.path.exists(CHARACTERS_FILE):
@@ -61,6 +82,7 @@ def save_characters(characters):
 # Global model and tokenizer
 model = None
 tokenizer = None
+vts = VTSConnector(VTS_HOST, VTS_PORT)
 
 def load_yuna():
     global model, tokenizer
@@ -88,6 +110,10 @@ def load_yuna():
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/vts_test')
+def vts_test():
+    return render_template('vts_test.html')
 
 VOICEVOX_URL = "http://localhost:50021"
 DEFAULT_SPEAKER_ID = 2 # Shikoku Metan (Normal)
@@ -125,6 +151,59 @@ def tts():
         return jsonify({"error": "VOICEVOX engine is not running. Please start VOICEVOX on port 50021."}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ============================================
+# VTube Studio API
+# ============================================
+@app.route('/api/vts/config', methods=['GET'])
+def get_vts_config():
+    return jsonify({
+        "host": vts.host,
+        "port": vts.port,
+        "connected": vts.connected,
+        "authenticated": vts.authenticated
+    })
+
+@app.route('/api/vts/connect', methods=['POST'])
+def vts_connect():
+    try:
+        data = request.json
+        if data.get('port'):
+            vts.port = int(data.get('port'))
+        
+        success, msg = vts.authenticate()
+        return jsonify({"success": success, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
+
+@app.route('/api/vts/clear_token', methods=['POST'])
+def vts_clear_token():
+    try:
+        success, msg = vts.clear_token()
+        return jsonify({"success": success, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
+
+@app.route('/api/vts/hotkeys', methods=['GET'])
+def get_vts_hotkeys():
+    try:
+        hotkeys = vts.get_hotkeys()
+        return jsonify(hotkeys)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/vts/trigger', methods=['POST'])
+def vts_trigger():
+    try:
+        data = request.json
+        hotkey_id = data.get('id')
+        if not hotkey_id:
+            return jsonify({"error": "No hotkey ID provided"}), 400
+            
+        success, msg = vts.trigger_hotkey(hotkey_id)
+        return jsonify({"success": success, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
 
 @app.route('/api/characters', methods=['GET'])
 def get_characters():

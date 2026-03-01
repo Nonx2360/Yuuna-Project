@@ -1,52 +1,115 @@
 # YuunaGPT 🌸
 
-YuunaGPT is a modern, expressive AI companion built for a seamless and high-quality chat experience. It combines a premium dark-themed interface with advanced Text-to-Speech (TTS) capabilities using VOICEVOX to bring your AI to life.
+Yuuna Project is a comprehensive AI companion system featuring Yuna-chan, a caring and expressive AI personality. This project combines a locally hosted language model with advanced integrations for voice synthesis, character management, and virtual avatar control.
 
 ## ✨ Features
 
-- **🚀 Real-time Streaming**: Enjoy lightning-fast, character-by-character responses for a natural conversation flow.
-- **🎨 Premium Chat UI**: A sleek, modern dark mode interface inspired by world-class chat applications.
-- **🎤 VOICEVOX Integration**: High-quality "Anime Girl" voice output for both Japanese and English.
-- **🎭 Emotion Control**: Switch Yuuna's "Voice Mood" on the fly between *Normal*, *Sweet*, *Tsundere*, *Sexy*, and *Whisper*.
-- **📝 Markdown Support**: Full support for rich text, including beautiful code highlighting, lists, and bold text.
-- **🛠️ Message Actions**: Effortlessly copy messages, rate responses, or trigger voice replay with a single click.
+- **🤖 Local AI Model**: Qwen2.5-1.5B-Instruct with custom LoRA fine-tuning for Yuna-chan's personality
+- **💬 Emotion-Based Responses**: Yuna-chan responds with emotion tags ([HAPPY], [SAD], [SHY], etc.) for expressive conversations
+- **🎤 VOICEVOX Integration**: High-quality text-to-speech synthesis with multiple voice options
+- **🎭 VTube Studio Support**: Control virtual avatars with hotkey triggers and expressions
+- **🌐 Web Interface**: Modern Flask-based chat UI with real-time streaming responses
+- **� Character Management**: Create and manage multiple AI personalities with custom system prompts
+- **� CLI Chat Mode**: Direct command-line interface for interactive conversations
+- **🔄 Streaming Responses**: Real-time character-by-character response generation
 
 ## 🛠️ Tech Stack
 
-- **Backend**: Python, Flask, PyTorch (Transformer-based inference).
-- **Frontend**: Vanilla HTML5, CSS3, JavaScript (ES6+), Marked.js.
-- **TTS Engine**: [VOICEVOX](https://voicevox.hiroshiba.jp/) (Local Engine).
+- **Backend**: Python 3.8+, Flask, PyTorch
+- **AI Model**: Qwen2.5-1.5B-Instruct with PEFT/LoRA fine-tuning
+- **TTS Engine**: [VOICEVOX](https://voicevox.hiroshiba.jp/) (Local Engine, port 50021)
+- **Avatar Control**: VTube Studio API integration (port 8001)
+- **Frontend**: HTML5, CSS3, JavaScript (ES6+)
+- **Libraries**: Transformers, Flask-CORS, WebSocket Client
 
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
 - Python 3.8+
-- [VOICEVOX Engine](https://voicevox.hiroshiba.jp/) (Download and run for TTS support).
+- PyTorch with CUDA support (recommended) or CPU
+- [VOICEVOX Engine](https://voicevox.hiroshiba.jp/) for TTS
+- [VTube Studio](https://denchisoft.com/) for avatar control (optional)
 
-### 2. Installation
-Clone the repository and install the dependencies:
+### 2. Model Setup
+Ensure you have the following directories in the project:
+```
+Yuuna-Project/
+├── Qwen2.5-1.5B-Instruct/  # Base model files
+└── Lora/                   # LoRA adapter files
+```
+
+### 3. Installation
 ```bash
 # Create and activate virtual environment
 python -m venv venv
-source venv/bin/scripts/activate  # Windows: venv\Scripts\activate
+venv\Scripts\activate  # Windows
 
-# Install requirements
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Running the App
-Start the Flask server:
+### 4. Running the Application
+
+**Web Interface Mode:**
 ```bash
 python app.py
 ```
-Then open your browser and navigate to `http://localhost:5000`.
+Then open `http://localhost:5000` in your browser.
 
-## 🎤 Setting up TTS (VOICEVOX)
-To enable YuunaGPT's voice:
-1. Download and install **VOICEVOX** (GPU mode recommended if you have an NVIDIA GPU).
-2. Launch the VOICEVOX application.
-3. Keep it running in the background while using YuunaGPT.
-4. Use the **Auto Voice** toggle in the sidebar to enable/disable speech.
+**Command-Line Chat Mode:**
+```bash
+python chat.py
+```
+
+## 🎤 Voice Setup (VOICEVOX)
+
+1. Download and install VOICEVOX
+2. Launch VOICEVOX application (runs on port 50021)
+3. Keep it running in the background
+4. The web interface will automatically connect for TTS functionality
+
+## 🎭 Avatar Setup (VTube Studio)
+
+1. Install and launch VTube Studio
+2. Enable API plugins in VTube Studio settings
+3. Use the VTS test page at `http://localhost:5000/vts_test`
+4. Configure hotkeys in VTube Studio for expression control
+
+## 📁 Project Structure
+
+```
+Yuuna-Project/
+├── app.py              # Main Flask web application
+├── chat.py             # Command-line chat interface
+├── vts_connector.py    # VTube Studio API connector
+├── characters.json     # Character definitions storage
+├── requirements.txt    # Python dependencies
+├── static/            # CSS, JS, and image assets
+├── templates/         # HTML templates
+├── Qwen2.5-1.5B-Instruct/  # Base model directory
+└── Lora/              # LoRA adapter directory
+```
+
+## 🎨 Character System
+
+The project supports multiple AI characters:
+- **Default Character**: Yuna-chan with predefined personality and emotion system
+- **Custom Characters**: Create new personalities with custom system prompts
+- **Character Management**: Add, edit, and delete characters through the web interface
+
+## 🔧 Configuration
+
+Key configuration options in `app.py`:
+- `BASE_MODEL_PATH`: Path to Qwen model
+- `LORA_PATH`: Path to LoRA adapter
+- `VTS_HOST/VTS_PORT`: VTube Studio connection settings
+- `VOICEVOX_URL`: VOICEVOX engine URL
+- `DEFAULT_SPEAKER_ID`: Default voice for TTS
 
 ## 📄 License
+
 This project is licensed under the MIT License. Feel free to explore and modify!
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to submit issues and enhancement requests.

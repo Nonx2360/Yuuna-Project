@@ -5,3 +5,6 @@
 /Lora
 /venv
 /characters.json
+*.txt
+/__pycache__
+*.vts_token 
