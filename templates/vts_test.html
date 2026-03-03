@@ -269,6 +269,19 @@
             </div>
         </div>
 
+        <div class="hotkeys-list" style="margin-top: 2rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2>Emotion Mappings</h2>
+                <button class="btn" style="padding: 0.5rem 1rem; font-size: 0.8rem; background: var(--success);"
+                    onclick="saveMappings()">Save Mappings</button>
+            </div>
+            <div id="emotion-mapping-list" class="hotkey-grid">
+                <!-- Emotion dropdowns will be loaded here -->
+                <p style="color: var(--text-dim); grid-column: span 3; text-align: center;">Connect VTS to assign
+                    emotions to hotkeys</p>
+            </div>
+        </div>
+
         <div id="log" class="log-area">
             [System] Ready to connect...
         </div>
@@ -358,6 +371,9 @@
                 const res = await fetch('/api/vts/hotkeys');
                 const hotkeys = await res.json();
                 renderHotkeys(hotkeys);
+
+                // Also load and render emotion mappings once hotkeys are available
+                await loadMappings(hotkeys);
             } catch (e) {
                 console.error(e);
             }
@@ -382,6 +398,78 @@
                 `;
                 grid.appendChild(card);
             });
+        }
+
+        const EMOTIONS = [
+            "HAPPY", "SAD", "SHY", "EXCITED", "WORRIED",
+            "LOVING", "PLAYFUL", "CALM", "SURPRISED",
+            "THOUGHTFUL", "CURIOUS"
+        ];
+        let currentMappings = {};
+
+        async function loadMappings(availableHotkeys) {
+            try {
+                const res = await fetch('/api/vts/mapping');
+                currentMappings = await res.json();
+                renderEmotionMappings(availableHotkeys);
+            } catch (e) {
+                console.error("Failed to load mappings:", e);
+                renderEmotionMappings(availableHotkeys);
+            }
+        }
+
+        function renderEmotionMappings(hotkeys) {
+            const container = document.getElementById('emotion-mapping-list');
+            container.innerHTML = '';
+
+            EMOTIONS.forEach(emotion => {
+                const card = document.createElement('div');
+                card.className = 'hotkey-card';
+
+                let options = '<option value="">(None)</option>';
+                hotkeys.forEach(hk => {
+                    const selected = currentMappings[emotion] === hk.hotkeyID ? 'selected' : '';
+                    options += `<option value="${hk.hotkeyID}" ${selected}>${hk.name}</option>`;
+                });
+
+                card.innerHTML = `
+                    <div class="hotkey-name">[${emotion}]</div>
+                    <select class="vts-select" data-emotion="${emotion}" 
+                            style="width: 100%; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 0.5rem; color: white;">
+                        ${options}
+                    </select>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        async function saveMappings() {
+            const selects = document.querySelectorAll('.vts-select');
+            const newMappings = {};
+
+            selects.forEach(sel => {
+                if (sel.value) {
+                    newMappings[sel.dataset.emotion] = sel.value;
+                }
+            });
+
+            addLog('Saving emotion mappings...');
+            try {
+                const res = await fetch('/api/vts/mapping', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newMappings)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    addLog('Mappings saved successfully!');
+                    currentMappings = newMappings;
+                } else {
+                    addLog(`Failed to save: ${data.message}`);
+                }
+            } catch (e) {
+                addLog(`Error saving mappings: ${e.message}`);
+            }
         }
 
         async function triggerHotkey(id, name) {

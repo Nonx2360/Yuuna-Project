@@ -27,10 +27,12 @@ let messageHistory = [];
 let currentAudio = null;
 let currentCharacter = null;
 let characters = [];
+let vtsMappings = {};
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     loadCharacters();
+    loadVTSMappings();
 });
 
 // Auto-resize textarea
@@ -69,6 +71,39 @@ async function speakText(text) {
         currentAudio.play();
     } catch (error) {
         console.error('TTS Playback error:', error);
+    }
+}
+
+async function loadVTSMappings() {
+    try {
+        const response = await fetch('/api/vts/mapping');
+        vtsMappings = await response.json();
+    } catch (error) {
+        console.error('Failed to load VTS mappings:', error);
+    }
+}
+
+async function triggerVTSForEmotion(text) {
+    if (!text) return;
+    
+    // Extract emotion tag like [HAPPY]
+    const match = text.match(/^\[([A-Z]+)\]/);
+    if (match) {
+        const emotion = match[1];
+        const hotkeyId = vtsMappings[emotion];
+        
+        if (hotkeyId) {
+            console.log(`Triggering VTS hotkey for emotion: [${emotion}]`);
+            try {
+                await fetch('/api/vts/trigger', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: hotkeyId })
+                });
+            } catch (error) {
+                console.error('VTS Trigger error:', error);
+            }
+        }
     }
 }
 
@@ -223,6 +258,9 @@ async function sendMessage() {
         if (ttsToggle.checked) {
             speakText(finalContent);
         }
+
+        // Trigger VTS movement based on emotion
+        triggerVTSForEmotion(finalContent);
 
     } catch (error) {
         console.error('Fetch error:', error);

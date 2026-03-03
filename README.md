@@ -1,4 +1,4 @@
-# YuunaGPT 🌸
+# Yuuna Project
 
 Yuuna Project is a comprehensive AI companion system featuring Yuna-chan, a caring and expressive AI personality. This project combines a locally hosted language model with advanced integrations for voice synthesis, character management, and virtual avatar control.
 
@@ -9,8 +9,8 @@ Yuuna Project is a comprehensive AI companion system featuring Yuna-chan, a cari
 - **🎤 VOICEVOX Integration**: High-quality text-to-speech synthesis with multiple voice options
 - **🎭 VTube Studio Support**: Control virtual avatars with hotkey triggers and expressions
 - **🌐 Web Interface**: Modern Flask-based chat UI with real-time streaming responses
-- **� Character Management**: Create and manage multiple AI personalities with custom system prompts
-- **� CLI Chat Mode**: Direct command-line interface for interactive conversations
+- **👥 Character Management**: Create and manage multiple AI personalities with custom system prompts
+- **📝 CLI Chat Mode**: Direct command-line interface for interactive conversations
 - **🔄 Streaming Responses**: Real-time character-by-character response generation
 
 ## 🛠️ Tech Stack

@@ -6,7 +6,7 @@ import requests
 import uuid
 from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer, BitsAndBytesConfig, StoppingCriteria, StoppingCriteriaList
 from peft import PeftModel
 from threading import Thread
 from vts_connector import VTSConnector
@@ -18,8 +18,9 @@ CORS(app)
 # Configuration
 # ============================================
 BASE_MODEL_PATH = r"c:\Users\Nonx2\Documents\Yuuna-Project\Qwen2.5-1.5B-Instruct"
-LORA_PATH = r"c:\Users\Nonx2\Documents\Yuuna-Project\Lora"
+LORA_PATH = r"c:\Users\Nonx2\Documents\Yuuna-Project\Qwen25-lora-finetuned"
 CHARACTERS_FILE = "characters.json"
+VTS_MAPPING_FILE = "vts_mappings.json"
 VTS_HOST = "127.0.0.1"
 VTS_PORT = 8001
 
@@ -84,6 +85,16 @@ model = None
 tokenizer = None
 vts = VTSConnector(VTS_HOST, VTS_PORT)
 
+class StopOnTokens(StoppingCriteria):
+    def __init__(self, stop_token_sequences):
+        self.stop_token_sequences = stop_token_sequences
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
+        for seq in self.stop_token_sequences:
+            if len(input_ids[0]) >= len(seq):
+                if torch.equal(input_ids[0][-len(seq):].cpu(), torch.tensor(seq)):
+                    return True
+        return False
+
 def load_yuna():
     global model, tokenizer
     print(f"Loading Yuna-chan on {DEVICE}...")
@@ -92,16 +103,29 @@ def load_yuna():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         
+    bnb_config = None
+    if DEVICE == "cuda":
+        try:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+            print("Quantization (4-bit) enabled.")
+        except Exception as e:
+            print(f"Warning: Could not initialize bitsandbytes: {e}")
+
     model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL_PATH,
+        quantization_config=bnb_config,
         torch_dtype=TORCH_DTYPE,
-        device_map="auto" if torch.cuda.is_available() else None,
+        device_map="auto" if DEVICE == "cuda" else None,
         trust_remote_code=True
     )
     
     model = PeftModel.from_pretrained(model, LORA_PATH)
     
-    if not torch.cuda.is_available():
+    if DEVICE == "cpu":
         model = model.to(DEVICE)
         
     model.eval()
@@ -115,40 +139,48 @@ def index():
 def vts_test():
     return render_template('vts_test.html')
 
-VOICEVOX_URL = "http://localhost:50021"
-DEFAULT_SPEAKER_ID = 2 # Shikoku Metan (Normal)
+GPT_SOVITS_URL = "http://localhost:9880"
+# Default reference audio (needs to exist for base model to function)
+# You can place a sample 3-10 second WAV file here
+DEFAULT_REFER_PATH = r"c:\Users\Nonx2\Documents\Yuuna-Project\ref_audio.wav"
+DEFAULT_REFER_TEXT = "This is a reference sentence for the base model."
+DEFAULT_REFER_LANG = "en"
 
 @app.route('/api/tts', methods=['POST'])
 def tts():
     data = request.json
     text = data.get('text', '')
-    speaker = data.get('speaker', DEFAULT_SPEAKER_ID)
+    refer_path = data.get('refer_audio_path', DEFAULT_REFER_PATH)
+    prompt_text = data.get('refer_text', DEFAULT_REFER_TEXT)
+    prompt_lang = data.get('refer_lang', DEFAULT_REFER_LANG)
+    target_lang = data.get('target_lang', "en")
     
     if not text:
         return jsonify({"error": "No text provided"}), 400
         
     try:
-        # 1. audio_query
-        query_res = requests.post(
-            f"{VOICEVOX_URL}/audio_query",
-            params={"text": text, "speaker": speaker}
+        # GPT-SoVITS API call
+        payload = {
+            "refer_wav_path": refer_path,
+            "prompt_text": prompt_text,
+            "prompt_language": prompt_lang,
+            "text": text,
+            "text_language": target_lang
+        }
+        
+        response = requests.post(
+            f"{GPT_SOVITS_URL}/",
+            json=payload,
+            timeout=30
         )
-        if query_res.status_code != 200:
-            return jsonify({"error": "VOICEVOX audio_query failed"}), 500
+        
+        if response.status_code != 200:
+            return jsonify({"error": f"GPT-SoVITS failed: {response.text}"}), 500
             
-        # 2. synthesis
-        synth_res = requests.post(
-            f"{VOICEVOX_URL}/synthesis",
-            params={"speaker": speaker},
-            json=query_res.json()
-        )
-        if synth_res.status_code != 200:
-            return jsonify({"error": "VOICEVOX synthesis failed"}), 500
-            
-        return Response(synth_res.content, mimetype='audio/wav')
+        return Response(response.content, mimetype='audio/wav')
         
     except requests.exceptions.ConnectionError:
-        return jsonify({"error": "VOICEVOX engine is not running. Please start VOICEVOX on port 50021."}), 503
+        return jsonify({"error": "GPT-SoVITS engine is not running. Please start GPT-SoVITS API on port 9880."}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -200,10 +232,34 @@ def vts_trigger():
         if not hotkey_id:
             return jsonify({"error": "No hotkey ID provided"}), 400
             
+        # Try to authenticate if not connected (lazy connect)
+        if not vts.connected or not vts.authenticated:
+            vts.authenticate()
+            
         success, msg = vts.trigger_hotkey(hotkey_id)
         return jsonify({"success": success, "message": msg})
     except Exception as e:
         return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
+
+@app.route('/api/vts/mapping', methods=['GET'])
+def get_vts_mapping():
+    try:
+        if os.path.exists(VTS_MAPPING_FILE):
+            with open(VTS_MAPPING_FILE, 'r') as f:
+                return jsonify(json.load(f))
+        return jsonify({})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/vts/mapping', methods=['POST'])
+def save_vts_mapping():
+    try:
+        mapping = request.json
+        with open(VTS_MAPPING_FILE, 'w') as f:
+            json.dump(mapping, f, indent=4)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/characters', methods=['GET'])
 def get_characters():
@@ -284,35 +340,61 @@ def chat():
     system_prompt = data.get('system_prompt', SYSTEM_PROMPT)
     character_id = data.get('character_id', 'default')
     
-    # Prepend system prompt if not present or empty
-    if not user_messages or user_messages[0].get('role') != 'system':
-        messages = [{"role": "system", "content": system_prompt}] + user_messages
+    # Prepend system prompt if not present or empty (Only for custom characters)
+    if character_id != 'default':
+        if not user_messages or user_messages[0].get('role') != 'system':
+            messages = [{"role": "system", "content": system_prompt}] + user_messages
+        else:
+            messages = user_messages
     else:
         messages = user_messages
 
     # Format for inference
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
+    if character_id == 'default':
+        # Use Alpaca format used in training/colab-chat.py
+        user_input = user_messages[-1]['content'] if user_messages else ""
+        text = f"### Instruction:\n{user_input}\n\n### Response:\n"
+    else:
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
     
     inputs = tokenizer(text, return_tensors="pt").to(model.device)
     
     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     
+    # Define more comprehensive stop sequences
+    stop_words = ["Human:", "User:", "### Instruction:", "### Response:", "### Question:", "\n###", "\nHuman:", "\nUser:", "Human", "User"]
+    stop_token_sequences = []
+    for word in stop_words:
+        encoded = tokenizer.encode(word, add_special_tokens=False)
+        if encoded:
+            stop_token_sequences.append(encoded)
+            
+    stopping_criteria = StoppingCriteriaList([StopOnTokens(stop_token_sequences)])
+
     generation_kwargs = dict(
         **inputs,
         streamer=streamer,
-        max_new_tokens=512,
+        max_new_tokens=256 if character_id == 'default' else 512,
         temperature=0.7,
         top_p=0.9,
-        top_k=50,
-        repetition_penalty=1.1,
         do_sample=True,
-        pad_token_id=tokenizer.pad_token_id,
+        repetition_penalty=1.1, # Added to prevent the looping behavior seen in screenshots
+        pad_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id,
+        stopping_criteria=stopping_criteria if character_id == 'default' else None
     )
+    
+    # Add optional parameters only for custom characters
+    if character_id != 'default':
+        generation_kwargs.update({
+            "top_k": 50,
+            "repetition_penalty": 1.1,
+            "pad_token_id": tokenizer.pad_token_id,
+        })
 
     def generate_task():
         if character_id != 'default':
@@ -328,7 +410,45 @@ def chat():
         thread = Thread(target=generate_task)
         thread.start()
         
+        full_response = ""
+        # Precise stop sequences for the stream to avoid yielding hallucinations
+        stop_sequences = ["Human:", "User:", "### Instruction:", "### Response:", "### Question:", "Human", "User"]
+        
         for new_text in streamer:
+            full_response += new_text
+            
+            # Check for stop sequences in the stream (using the full accumulated response)
+            should_stop = False
+            for seq in stop_sequences:
+                if seq in full_response:
+                    # Capture the part of the response BEFORE the first occurrence of any stop sequence
+                    should_stop = True
+                    break
+            
+            if should_stop:
+                # We found a stop sequence. Now we must extract the clean part.
+                # Find the earliest stop sequence in the full response
+                earliest_pos = len(full_response)
+                for seq in stop_sequences:
+                    pos = full_response.find(seq)
+                    if pos != -1 and pos < earliest_pos:
+                        earliest_pos = pos
+                
+                # The "clean" response is everything before earliest_pos
+                # We want to yield ONLY the part of 'new_text' that is before the stop sequence.
+                # To do this safely, we calculate how much of the clean response we haven't yielded yet.
+                yielded_so_far = full_response[:-len(new_text)]
+                clean_full_response = full_response[:earliest_pos]
+                
+                # If the clean response is longer than what we already yielded, yield the difference
+                if len(clean_full_response) > len(yielded_so_far):
+                    remaining_clean = clean_full_response[len(yielded_so_far):]
+                    if remaining_clean:
+                        yield remaining_clean
+                
+                print(f"DEBUG: Stopped generation because a turn marker was detected.")
+                break
+                
             yield new_text
             
         end_time = time.time()

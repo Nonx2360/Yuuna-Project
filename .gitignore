@@ -8,3 +8,16 @@
 *.txt
 /__pycache__
 *.vts_token 
+*.wav
+*.jsonl
+/Lora_Old
+*.csv
+/Qwen25-lora-finetuned
+/tag_distribution_plotfifth.png
+/tag_distribution_plot-firstTRY.png
+/tag_distribution_plotfourth.png
+/tag_distribution_plotsecoundthird.png
+/tag_distribution_plotthird.png
+/colab-chat.py
+/add_and_clean_v2.py
+/analystic.py
