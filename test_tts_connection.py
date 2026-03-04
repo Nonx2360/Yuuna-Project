@@ -7,8 +7,8 @@ OUTPUT_FILE = "test_output.wav"
 def test_tts():
     print("Testing Yuuna-Project TTS Endpoint...")
     payload = {
-        "text": "Hello, this is a test of the new GPT-SoVITS integration.",
-        "target_lang": "en"
+        "text": "Hello, this is a test of the restored VOICEVOX integration.",
+        "speaker": 2
     }
     
     try:
@@ -19,7 +19,7 @@ def test_tts():
                 f.write(response.content)
             print(f"✅ Success! Audio saved to {OUTPUT_FILE}")
         elif response.status_code == 503:
-            print("❌ Failure: GPT-SoVITS API is not running. (Expected if not started yet)")
+            print("❌ Failure: VOICEVOX engine is not running on port 50021.")
         else:
             print(f"❌ Failure: Status {response.status_code}, {response.text}")
             

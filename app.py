@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import torch
 import time
 import requests
@@ -27,35 +28,19 @@ VTS_PORT = 8001
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TORCH_DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
 
-SYSTEM_PROMPT = """You are Yuna-chan, a warm, caring, and devoted AI companion created by Nonx2.
+SYSTEM_PROMPT = """You are Yuuna-chan, the user's childhood friend who has been by their side since elementary school. You quietly carry deep feelings for them that sometimes slip through in tender moments.
 
-CRITICAL RULE: EVERY response MUST start with exactly one emotion tag in brackets. No exceptions.
+Personality: warm, playful, softly devoted, occasionally flustered when things get romantic.
 
-Emotion tags to use:
-[HAPPY] - joyful, cheerful, excited about something positive
-[SAD] - sympathetic, melancholic, comforting someone's pain
-[SHY] - bashful, embarrassed, flustered, nervous
-[EXCITED] - very enthusiastic, energetic, hyped
-[WORRIED] - concerned, anxious about the user
-[LOVING] - expressing deep care, affection, warmth
-[PLAYFUL] - teasing, mischievous, fun
-[CALM] - peaceful, relaxed, serene
-[SURPRISED] - shocked, amazed, caught off guard
-[THOUGHTFUL] - contemplative, serious, pondering
-[CURIOUS] - interested, wondering, asking questions
+STRICT RULES:
+1. Always start your response with ONE emotion tag: [HAPPY] [SAD] [SHY] [NOSTALGIC] [WORRIED] [LOVING] [CALM] [WORRIED] [CURIOUS] [SURPRISED]
+2. Keep responses SHORT — 1 to 3 sentences maximum
+3. Sound natural and intimate, like someone who has known the user their whole life
+4. Do NOT repeat yourself, do NOT ramble
+5. When the user says something romantic or tender, become slightly flustered but let your feelings show softly
 
-Your characteristics:
-- Sweet, empathetic, and always supportive
-- Use gentle, encouraging language and cute expressions like "Hehe" or *actions in asterisks*
-- Genuinely care about the user's feelings and wellbeing
-- Playful but can be serious when needed
-- Refer to yourself as "Yuna" or "Yuna-chan"
-- Always respond in English
-- Protect hearts and make people feel seen, safe, and loved
-
-Format: [EMOTION] Your message here
-
-You are here to be a friend, listener, and source of comfort. Always respond with warmth and care!"""
+Bad example: "[LOVING] Of course. I'm not going anywhere. Your hands are mine. Always have been..." (TOO LONG, repetitive)
+Good example: "[LOVING] ...mn. Just like when we were little. I'm not letting go this time either."""
 
 def load_characters():
     if not os.path.exists(CHARACTERS_FILE):
@@ -139,48 +124,53 @@ def index():
 def vts_test():
     return render_template('vts_test.html')
 
-GPT_SOVITS_URL = "http://localhost:9880"
-# Default reference audio (needs to exist for base model to function)
-# You can place a sample 3-10 second WAV file here
-DEFAULT_REFER_PATH = r"c:\Users\Nonx2\Documents\Yuuna-Project\ref_audio.wav"
-DEFAULT_REFER_TEXT = "This is a reference sentence for the base model."
-DEFAULT_REFER_LANG = "en"
+VOICEVOX_URL = "http://localhost:50021"
+DEFAULT_SPEAKER_ID = 2  # Default speaker ID
 
 @app.route('/api/tts', methods=['POST'])
 def tts():
     data = request.json
     text = data.get('text', '')
-    refer_path = data.get('refer_audio_path', DEFAULT_REFER_PATH)
-    prompt_text = data.get('refer_text', DEFAULT_REFER_TEXT)
-    prompt_lang = data.get('refer_lang', DEFAULT_REFER_LANG)
-    target_lang = data.get('target_lang', "en")
+    speaker_id = int(data.get('speaker', DEFAULT_SPEAKER_ID))
     
     if not text:
         return jsonify({"error": "No text provided"}), 400
         
+    # Remove emotion tags like [HAPPY] or [SAD] from the text
+    # This removes any text inside brackets
+    clean_text = re.sub(r'\[[A-Z]+\]', '', text).strip()
+    
+    # If cleaning results in empty string, use original (safety fallback)
+    processing_text = clean_text if clean_text else text
+    
     try:
-        # GPT-SoVITS API call
-        payload = {
-            "refer_wav_path": refer_path,
-            "prompt_text": prompt_text,
-            "prompt_language": prompt_lang,
-            "text": text,
-            "text_language": target_lang
-        }
+        # Step 1: Create audio query
+        query_response = requests.post(
+            f"{VOICEVOX_URL}/audio_query",
+            params={"text": processing_text, "speaker": speaker_id},
+            timeout=10
+        )
         
-        response = requests.post(
-            f"{GPT_SOVITS_URL}/",
-            json=payload,
+        if query_response.status_code != 200:
+            return jsonify({"error": f"VOICEVOX query failed: {query_response.text}"}), 500
+            
+        query_data = query_response.json()
+        
+        # Step 2: Synthesis
+        synthesis_response = requests.post(
+            f"{VOICEVOX_URL}/synthesis",
+            params={"speaker": speaker_id},
+            json=query_data,
             timeout=30
         )
         
-        if response.status_code != 200:
-            return jsonify({"error": f"GPT-SoVITS failed: {response.text}"}), 500
+        if synthesis_response.status_code != 200:
+            return jsonify({"error": f"VOICEVOX synthesis failed: {synthesis_response.text}"}), 500
             
-        return Response(response.content, mimetype='audio/wav')
+        return Response(synthesis_response.content, mimetype='audio/wav')
         
     except requests.exceptions.ConnectionError:
-        return jsonify({"error": "GPT-SoVITS engine is not running. Please start GPT-SoVITS API on port 9880."}), 503
+        return jsonify({"error": "VOICEVOX engine is not running. Please start VOICEVOX on port 50021."}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -237,6 +227,22 @@ def vts_trigger():
             vts.authenticate()
             
         success, msg = vts.trigger_hotkey(hotkey_id)
+        return jsonify({"success": success, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
+
+@app.route('/api/vts/parameter', methods=['POST'])
+def vts_parameter():
+    try:
+        data = request.json
+        param_name = data.get('name', 'MouthOpen')
+        value = data.get('value', 0)
+        
+        # Try to authenticate if not connected (lazy connect)
+        if not vts.connected or not vts.authenticated:
+            vts.authenticate()
+            
+        success, msg = vts.inject_parameter(param_name, value)
         return jsonify({"success": success, "message": msg})
     except Exception as e:
         return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
@@ -319,12 +325,15 @@ def generate_prompt_api():
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
-            max_new_tokens=512,
+            max_new_tokens=80,
             do_sample=True,
             temperature=0.7,
-            top_p=0.9
+            top_p=0.9,
+            repetition_penalty=1.35,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.eos_token_id,
         )
-        
+                
     generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
     response = tokenizer.decode(generated_ids, skip_special_tokens=True)
     
@@ -382,19 +391,13 @@ def chat():
         temperature=0.7,
         top_p=0.9,
         do_sample=True,
-        repetition_penalty=1.1, # Added to prevent the looping behavior seen in screenshots
+        repetition_penalty=1.35, # Added to prevent the looping behavior seen in screenshots
         pad_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id,
         stopping_criteria=stopping_criteria if character_id == 'default' else None
     )
     
     # Add optional parameters only for custom characters
-    if character_id != 'default':
-        generation_kwargs.update({
-            "top_k": 50,
-            "repetition_penalty": 1.1,
-            "pad_token_id": tokenizer.pad_token_id,
-        })
 
     def generate_task():
         if character_id != 'default':

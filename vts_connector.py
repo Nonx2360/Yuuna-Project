@@ -138,6 +138,26 @@ class VTSConnector:
             return True, "Hotkey triggered"
         return False, res if not success else "Failed to trigger"
 
+    def inject_parameter(self, parameter_name, value, weight=1.0):
+        """
+        Injects a value into a VTS parameter for lip-sync or other controls.
+        """
+        data = {
+            "faceFound": False,
+            "mode": "set",
+            "parameterValues": [
+                {
+                    "id": parameter_name,
+                    "value": float(value),
+                    "weight": float(weight)
+                }
+            ]
+        }
+        success, res = self._execute("InjectParameterDataRequest", data)
+        if success and res.get("messageType") == "InjectParameterDataResponse":
+            return True, "Parameter injected"
+        return False, res if not success else "Failed to inject parameter"
+
     def clear_token(self):
         self.token = None
         if os.path.exists(self.token_file):

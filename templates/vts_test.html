@@ -277,9 +277,11 @@
             </div>
             <div id="emotion-mapping-list" class="hotkey-grid">
                 <!-- Emotion dropdowns will be loaded here -->
-                <p style="color: var(--text-dim); grid-column: span 3; text-align: center;">Connect VTS to assign
-                    emotions to hotkeys</p>
+                <p style="color: var(--text-dim); grid-column: span 3; text-align: center;">Loading mappings...</p>
             </div>
+            <p style="color: var(--text-dim); font-size: 0.8rem; margin-top: 1rem; text-align: center;">
+                Settings are saved to <code>vts_mappings.json</code> in your project folder.
+            </p>
         </div>
 
         <div id="log" class="log-area">
@@ -320,6 +322,8 @@
                 } else {
                     authBadge.textContent = 'AUTH: NO';
                     authBadge.className = 'badge badge-disconnected';
+                    // Load and show saved mappings even if not connected
+                    loadMappings([]);
                 }
             } catch (e) {
                 console.error(e);
@@ -403,7 +407,7 @@
         const EMOTIONS = [
             "HAPPY", "SAD", "SHY", "EXCITED", "WORRIED",
             "LOVING", "PLAYFUL", "CALM", "SURPRISED",
-            "THOUGHTFUL", "CURIOUS"
+            "THOUGHTFUL", "CURIOUS", "RESET"
         ];
         let currentMappings = {};
 
@@ -427,6 +431,14 @@
                 card.className = 'hotkey-card';
 
                 let options = '<option value="">(None)</option>';
+
+                // If we have a saved mapping but and no hotkeys yet (disconnected), 
+                // or the saved hotkey isn't in the list, show the ID as a placeholder
+                const savedId = currentMappings[emotion];
+                if (savedId && !hotkeys.find(hk => hk.hotkeyID === savedId)) {
+                    options += `<option value="${savedId}" selected>Saved ID: ${savedId.substring(0, 8)}...</option>`;
+                }
+
                 hotkeys.forEach(hk => {
                     const selected = currentMappings[emotion] === hk.hotkeyID ? 'selected' : '';
                     options += `<option value="${hk.hotkeyID}" ${selected}>${hk.name}</option>`;

@@ -68,6 +68,36 @@ async function speakText(text) {
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         currentAudio = new Audio(url);
+
+        // Start lip-sync (open mouth)
+        currentAudio.onplay = () => {
+            fetch('/api/vts/parameter', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'MouthOpen', value: 1 })
+            }).catch(e => console.error('Lip-sync start error:', e));
+        };
+
+        // Stop lip-sync (close mouth)
+        currentAudio.onended = () => {
+            fetch('/api/vts/parameter', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'MouthOpen', value: 0 })
+            }).catch(e => console.error('Lip-sync end error:', e));
+
+            // Trigger Reset Hotkey if mapped
+            const resetHotkeyId = vtsMappings['RESET'];
+            if (resetHotkeyId) {
+                console.log('Triggering VTS reset hotkey after speech.');
+                fetch('/api/vts/trigger', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: resetHotkeyId })
+                }).catch(e => console.error('Reset trigger error:', e));
+            }
+        };
+
         currentAudio.play();
     } catch (error) {
         console.error('TTS Playback error:', error);
@@ -85,13 +115,13 @@ async function loadVTSMappings() {
 
 async function triggerVTSForEmotion(text) {
     if (!text) return;
-    
-    // Extract emotion tag like [HAPPY]
-    const match = text.match(/^\[([A-Z]+)\]/);
+
+    // Extract emotion tag like [HAPPY] anywhere in the string, but usually at the start
+    const match = text.match(/\[([A-Z]+)\]/);
     if (match) {
         const emotion = match[1];
         const hotkeyId = vtsMappings[emotion];
-        
+
         if (hotkeyId) {
             console.log(`Triggering VTS hotkey for emotion: [${emotion}]`);
             try {
@@ -103,6 +133,8 @@ async function triggerVTSForEmotion(text) {
             } catch (error) {
                 console.error('VTS Trigger error:', error);
             }
+        } else {
+            console.log(`Emotion [${emotion}] not mapped to a hotkey. Ignoring.`);
         }
     }
 }
