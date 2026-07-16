@@ -17,7 +17,7 @@ import os
 # Configuration
 # ============================================
 BASE_MODEL_PATH = r"C:\Users\Nonx2\Downloads\My_Wife\Qwen2.5-1.5B-Instruct"
-LORA_PATH = r"C:\Users\Nonx2\Downloads\My_Wife\Lora"
+LORA_PATH = r"C:\Users\Nonx2\Documents\Yuuna-Project\Qwen25-lora-finetuned"
 
 # Model settings
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

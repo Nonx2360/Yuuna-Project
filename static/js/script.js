@@ -308,6 +308,56 @@ input.addEventListener('keydown', (e) => {
     }
 });
 
+// ============================================
+// Voice Input (STT) Logic
+// ============================================
+const voiceBtn = document.querySelector('.voice-btn');
+let isRecording = false;
+
+if (voiceBtn) {
+    voiceBtn.addEventListener('click', async () => {
+        if (isRecording) return; // Prevent multiple clicks
+
+        isRecording = true;
+        voiceBtn.classList.add('recording');
+        voiceBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" style="animation: spin 2s linear infinite;">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg> Listening...`;
+
+        try {
+            const response = await fetch('/api/stt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ duration: 5 }) // Default 5 seconds
+            });
+
+            if (!response.ok) throw new Error('STT request failed');
+
+            const data = await response.json();
+            if (data.text) {
+                // Append to current input or set it
+                if (input.value.trim()) {
+                    input.value = input.value.trim() + ' ' + data.text;
+                } else {
+                    input.value = data.text;
+                }
+                // Trigger input event to resize textarea
+                input.dispatchEvent(new Event('input'));
+            }
+        } catch (error) {
+            console.error('STT Error:', error);
+            alert('Failed to transcribe voice. Please check your microphone and server logs.');
+        } finally {
+            isRecording = false;
+            voiceBtn.classList.remove('recording');
+            voiceBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16">
+                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" fill="currentColor" />
+                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" fill="currentColor" />
+            </svg> Voice`;
+        }
+    });
+}
+
 // Sidebar Toggle for Mobile
 const menuToggle = document.getElementById('menu-toggle');
 const sidebar = document.querySelector('.sidebar');

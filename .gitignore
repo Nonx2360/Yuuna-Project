@@ -22,3 +22,8 @@
 /add_and_clean_v2.py
 /analystic.py
 *.json
+/VOICEVOX
+/new-ds
+*.mp3
+/Qwen25-lora-finetuned_old
+/TTS/Qwen3-TTS

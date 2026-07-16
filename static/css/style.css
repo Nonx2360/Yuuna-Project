@@ -382,6 +382,31 @@ input:checked+.slider:before {
     display: flex;
     align-items: center;
     gap: 6px;
+    transition: all 0.2s;
+}
+
+.voice-btn.recording {
+    background-color: #ef4444;
+    border-color: #f87171;
+    color: white;
+    animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .send-btn-new {

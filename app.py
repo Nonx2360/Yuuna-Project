@@ -11,6 +11,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStream
 from peft import PeftModel
 from threading import Thread
 from vts_connector import VTSConnector
+from user_mic.stt_handler import get_stt_handler
+from user_mic.recorder import get_recorder
 
 app = Flask(__name__)
 CORS(app)
@@ -33,11 +35,11 @@ SYSTEM_PROMPT = """You are Yuuna-chan, the user's childhood friend who has been 
 Personality: warm, playful, softly devoted, occasionally flustered when things get romantic.
 
 STRICT RULES:
-1. Always start your response with ONE emotion tag: [HAPPY] [SAD] [SHY] [NOSTALGIC] [WORRIED] [LOVING] [CALM] [WORRIED] [CURIOUS] [SURPRISED]
-2. Keep responses SHORT — 1 to 3 sentences maximum
-3. Sound natural and intimate, like someone who has known the user their whole life
-4. Do NOT repeat yourself, do NOT ramble
-5. When the user says something romantic or tender, become slightly flustered but let your feelings show softly
+1. Always start your response with exactly ONE tag from this list: [HAPPY], [SAD], [SHY], [NOSTALGIC], [WORRIED], [LOVING], [CALM], [CURIOUS], [SURPRISED], [EXCITED].
+2. Keep responses SHORT — 1 to 3 sentences maximum.
+3. Sound natural and intimate, like someone who has known the user their whole life.
+4. Do NOT use ANY parentheses (), brackets [], or asterisks ** except for the single tag at the very start.
+5. When the user says something romantic or tender, become slightly flustered but let your feelings show softly.
 
 Bad example: "[LOVING] Of course. I'm not going anywhere. Your hands are mine. Always have been..." (TOO LONG, repetitive)
 Good example: "[LOVING] ...mn. Just like when we were little. I'm not letting go this time either."""
@@ -360,9 +362,18 @@ def chat():
 
     # Format for inference
     if character_id == 'default':
-        # Use Alpaca format used in training/colab-chat.py
-        user_input = user_messages[-1]['content'] if user_messages else ""
-        text = f"### Instruction:\n{user_input}\n\n### Response:\n"
+        # Include history and system prompt for default character
+        prompt_text = f"### Instruction:\n{system_prompt}\n\n"
+        
+        # Add conversation history
+        for msg in user_messages[:-1]:
+            role = "User" if msg['role'] == 'user' else "Response"
+            prompt_text += f"{role}: {msg['content']}\n"
+        
+        # Add current user input
+        current_input = user_messages[-1]['content'] if user_messages else ""
+        prompt_text += f"User: {current_input}\n\n### Response:\n"
+        text = prompt_text
     else:
         text = tokenizer.apply_chat_template(
             messages,
@@ -375,7 +386,7 @@ def chat():
     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
     
     # Define more comprehensive stop sequences
-    stop_words = ["Human:", "User:", "### Instruction:", "### Response:", "### Question:", "\n###", "\nHuman:", "\nUser:", "Human", "User"]
+    stop_words = ["Human:", "User:", "### Instruction:", "### Response:", "### Question:", "\n###", "\nHuman:", "\nUser:", "Human", "User", "\n\n", "\n["]
     stop_token_sequences = []
     for word in stop_words:
         encoded = tokenizer.encode(word, add_special_tokens=False)
@@ -387,11 +398,11 @@ def chat():
     generation_kwargs = dict(
         **inputs,
         streamer=streamer,
-        max_new_tokens=256 if character_id == 'default' else 512,
+        max_new_tokens=50 if character_id == 'default' else 512,
         temperature=0.7,
         top_p=0.9,
         do_sample=True,
-        repetition_penalty=1.35, # Added to prevent the looping behavior seen in screenshots
+        repetition_penalty=1.1, # Lowered from 1.35 which was causing hallucinations
         pad_token_id=tokenizer.eos_token_id,
         eos_token_id=tokenizer.eos_token_id,
         stopping_criteria=stopping_criteria if character_id == 'default' else None
@@ -415,18 +426,43 @@ def chat():
         
         full_response = ""
         # Precise stop sequences for the stream to avoid yielding hallucinations
-        stop_sequences = ["Human:", "User:", "### Instruction:", "### Response:", "### Question:", "Human", "User"]
+        # Adding " [", " (", " *" to stop if model tries to add secondary tags or actions
+        stop_sequences = ["Human:", "User:", "### Instruction:", "### Response:", "### Question:", "Human", "User", " [", " (", " *"]
+        
+        first_tag_passed = False
+        sentence_count = 0
+        punctuation = ['.', '!', '?']
         
         for new_text in streamer:
             full_response += new_text
             
-            # Check for stop sequences in the stream (using the full accumulated response)
             should_stop = False
-            for seq in stop_sequences:
-                if seq in full_response:
-                    # Capture the part of the response BEFORE the first occurrence of any stop sequence
+            
+            # Count sentences to enforce the 3-sentence rule
+            # Only start counting after the first tag is passed
+            if first_tag_passed:
+                for char in new_text:
+                    if char in punctuation:
+                        sentence_count += 1
+            
+            if sentence_count >= 3:
+                should_stop = True
+
+            # Additional logic to stop on any '[' that isn't the very first character
+            if not first_tag_passed:
+                if ']' in full_response:
+                    first_tag_passed = True
+            else:
+                tag_end_pos = full_response.find(']')
+                if '[' in full_response[tag_end_pos + 1:]:
                     should_stop = True
-                    break
+
+            # Check for standard stop sequences
+            if not should_stop:
+                for seq in stop_sequences:
+                    if seq in full_response:
+                        should_stop = True
+                        break
             
             if should_stop:
                 # We found a stop sequence. Now we must extract the clean part.
@@ -436,6 +472,20 @@ def chat():
                     pos = full_response.find(seq)
                     if pos != -1 and pos < earliest_pos:
                         earliest_pos = pos
+                
+                # ALSO check for any forbidden symbols '[' after the first tag
+                if first_tag_passed:
+                    tag_end_pos = full_response.find(']')
+                    
+                    # Look for '[', '(', '*' in the part AFTER the first tag
+                    forbidden_pos = len(full_response)
+                    for char in ['[', '(', '*']:
+                        pos = full_response.find(char, tag_end_pos + 1)
+                        if pos != -1 and pos < forbidden_pos:
+                            forbidden_pos = pos
+                    
+                    if forbidden_pos < earliest_pos:
+                        earliest_pos = forbidden_pos
                 
                 # The "clean" response is everything before earliest_pos
                 # We want to yield ONLY the part of 'new_text' that is before the stop sequence.
@@ -460,6 +510,42 @@ def chat():
         yield f"\n__DURATION__{duration}"
 
     return Response(generate(), mimetype='text/event-stream')
+
+# ============================================
+# Speech-to-Text API
+# ============================================
+@app.route('/api/stt', methods=['POST'])
+def stt_api():
+    try:
+        data = request.json or {}
+        duration = int(data.get('duration', 5))
+        
+        # Create a temporary file for the recording
+        temp_dir = "temp_docs"
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)
+        
+        output_file = os.path.join(temp_dir, f"record_{uuid.uuid4()}.wav")
+        
+        # Record
+        recorder = get_recorder()
+        success = recorder.record(output_file, duration=duration)
+        
+        if not success:
+            return jsonify({"error": "Failed to record audio"}), 500
+            
+        # Transcribe
+        handler = get_stt_handler()
+        text = handler.transcribe(output_file)
+        
+        # Clean up
+        if os.path.exists(output_file):
+            os.remove(output_file)
+            
+        return jsonify({"text": text})
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     # Use environment variable check to prevent loading the model twice when using Flask's reloader
