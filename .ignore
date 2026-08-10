@@ -1,3 +1,4 @@
+# Force OpenCode to see these even if they are in .gitignore
 /plant.txt
 /dataset.jsonl
 /app.log
