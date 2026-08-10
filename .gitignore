@@ -6,7 +6,8 @@
 /venv
 /characters.json
 *.txt
-/__pycache__
+__pycache__/
+*.pyc
 *.vts_token 
 *.wav
 *.jsonl
