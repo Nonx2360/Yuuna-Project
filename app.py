@@ -19,6 +19,8 @@ from threading import Thread
 from vts_connector import VTSConnector
 from user_mic.stt_handler import get_stt_handler
 from user_mic.recorder import get_recorder
+from tts.yuuna_reply import parse_gemma_output, format_display_text
+from tts.qwen_handler import get_tts_handler
 
 app = Flask(__name__)
 CORS(app)
@@ -72,6 +74,7 @@ def save_characters(characters):
 
 model = None
 processor = None
+tts_handler = None
 vts = VTSConnector(VTS_HOST, VTS_PORT)
 
 
@@ -120,6 +123,21 @@ def load_yuna():
     print("Gemma 4 E4B is ready!")
 
 
+def load_tts():
+    global tts_handler
+    print("Loading Qwen3-TTS...")
+    try:
+        tts_handler = get_tts_handler()
+        tts_handler.load()
+        print("Qwen3-TTS is ready!")
+    except Exception as e:
+        tts_handler = get_tts_handler()
+        tts_handler.error = str(e)
+        tts_handler.ready = False
+        print(f"Warning: Qwen3-TTS failed to load: {e}")
+        print("TTS will fall back to text-only replies.")
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -132,19 +150,46 @@ def vts_test():
 
 VOICEVOX_URL = "http://localhost:50021"
 DEFAULT_SPEAKER_ID = 2
+USE_QWEN_TTS = os.environ.get("USE_QWEN_TTS", "1") != "0"
 
 
 @app.route("/api/tts", methods=["POST"])
 def tts():
-    data = request.json
+    data = request.json or {}
+    raw_gemma_output = data.get("raw_gemma_output")
     text = data.get("text", "")
-    speaker_id = int(data.get("speaker", DEFAULT_SPEAKER_ID))
+    emotion = data.get("emotion")
+    intensity = data.get("intensity")
 
-    if not text:
+    if raw_gemma_output:
+        reply = parse_gemma_output(raw_gemma_output)
+    elif text:
+        reply = parse_gemma_output(text)
+        if emotion:
+            reply.emotion = emotion
+        if intensity is not None:
+            reply.intensity = float(intensity)
+    else:
         return jsonify({"error": "No text provided"}), 400
 
-    clean_text = re.sub(r"\[[A-Z]+\]", "", text).strip()
-    processing_text = clean_text if clean_text else text
+    if not reply.text.strip():
+        return jsonify({"error": "No speakable text"}), 400
+
+    if USE_QWEN_TTS and tts_handler and tts_handler.ready:
+        try:
+            def chunk_generator(chunk_size=4096):
+                for chunk in tts_handler.iter_wav_chunks(reply, chunk_size=chunk_size):
+                    yield chunk
+
+            return Response(chunk_generator(), mimetype="audio/wav")
+        except Exception as e:
+            print(f"TTS generation failed: {e}")
+            return jsonify({"error": f"TTS generation failed: {e}"}), 500
+
+    # Legacy VOICEVOX fallback
+    clean_text = re.sub(r"\[[A-Z]+\]", "", reply.text).strip()
+    processing_text = clean_text if clean_text else reply.text
+    speaker_id = int(data.get("speaker", DEFAULT_SPEAKER_ID))
 
     try:
         query_response = requests.post(
@@ -171,9 +216,23 @@ def tts():
         return Response(synthesis_response.content, mimetype="audio/wav")
 
     except requests.exceptions.ConnectionError:
-        return jsonify({"error": "VOICEVOX engine is not running. Please start VOICEVOX on port 50021."}), 503
+        return jsonify({
+            "error": "No TTS engine available. Qwen3-TTS is not loaded and VOICEVOX is not running."
+        }), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tts/status", methods=["GET"])
+def tts_status():
+    if tts_handler is None:
+        return jsonify({"engine": "none", "ready": False})
+    return jsonify({
+        "engine": "qwen3-tts" if tts_handler.ready else "unavailable",
+        "ready": tts_handler.ready,
+        "error": tts_handler.error,
+        "sample_rate": tts_handler.sample_rate,
+    })
 
 
 @app.route("/api/vts/config", methods=["GET"])
@@ -499,6 +558,19 @@ def chat():
 
         end_time = time.time()
         duration = round(end_time - start_time, 2)
+
+        if character_id == "default":
+            parsed = parse_gemma_output(full_response)
+            display = format_display_text(parsed)
+            meta = json.dumps({
+                "text": parsed.text,
+                "emotion": parsed.emotion,
+                "intensity": parsed.intensity,
+                "display": display,
+                "raw": full_response.strip(),
+            }, ensure_ascii=False)
+            yield f"\n__PARSED__{meta}"
+
         yield f"\n__DURATION__{duration}"
 
     return Response(generate(), mimetype="text/event-stream")
@@ -537,8 +609,10 @@ def stt_api():
 if __name__ == "__main__":
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         load_yuna()
+        load_tts()
     elif not os.environ.get("WERKZEUG_RUN_MAIN"):
         if not app.debug:
             load_yuna()
+            load_tts()
 
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -2,7 +2,11 @@ flask
 flask-cors
 transformers
 torch
+torchaudio
 accelerate
 bitsandbytes
 requests
 websocket-client
+soundfile
+pydantic
+qwen-tts

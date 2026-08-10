@@ -41,29 +41,39 @@ input.addEventListener('input', function () {
     this.style.height = (this.scrollHeight) + 'px';
 });
 
-async function speakText(text) {
-    if (!text) return;
+async function speakText(text, ttsMeta = null) {
+    if (!text && !ttsMeta) return;
 
-    // Stop any current audio
     if (currentAudio) {
         currentAudio.pause();
         currentAudio = null;
     }
 
-    const speakerId = moodSelector.value;
+    const payload = ttsMeta
+        ? {
+            text: ttsMeta.text,
+            emotion: ttsMeta.emotion,
+            intensity: ttsMeta.intensity,
+            raw_gemma_output: ttsMeta.raw || null,
+        }
+        : { text: text, speaker: moodSelector.value };
 
     try {
         const response = await fetch('/api/tts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: text, speaker: speakerId })
+            body: JSON.stringify(payload)
         });
 
         if (response.status === 503) {
-            alert("VOICEVOX engine is not running. Please start it on port 50021 to hear the voice!");
+            console.warn('TTS engine unavailable — continuing with text-only reply.');
             return;
         }
-        if (!response.ok) throw new Error('TTS failed');
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            console.error('TTS failed:', err.error || response.statusText);
+            return;
+        }
 
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
@@ -255,6 +265,7 @@ async function sendMessage() {
         const decoder = new TextDecoder();
         let fullResponse = '';
         let duration = null;
+        let parsedMeta = null;
 
         assistantBubble.textContent = '';
 
@@ -264,12 +275,29 @@ async function sendMessage() {
 
             const chunk = decoder.decode(value, { stream: true });
 
-            if (chunk.includes('__DURATION__')) {
+            if (chunk.includes('__PARSED__')) {
+                const parts = chunk.split('__PARSED__');
+                fullResponse += parts[0];
+                try {
+                    const metaPart = parts[1].split('__DURATION__')[0];
+                    parsedMeta = JSON.parse(metaPart);
+                    fullResponse = parsedMeta.display || parsedMeta.text;
+                    assistantBubble.innerHTML = marked.parse(fullResponse.trim());
+                } catch (e) {
+                    console.warn('Could not parse Yuuna reply metadata:', e);
+                }
+                if (parts[1].includes('__DURATION__')) {
+                    duration = parts[1].split('__DURATION__')[1];
+                }
+            } else if (chunk.includes('__DURATION__')) {
                 const parts = chunk.split('__DURATION__');
                 fullResponse += parts[0];
                 duration = parts[1];
 
-                assistantBubble.innerHTML = marked.parse(fullResponse.trim());
+                const displayText = parsedMeta
+                    ? (parsedMeta.display || parsedMeta.text)
+                    : fullResponse.trim();
+                assistantBubble.innerHTML = marked.parse(displayText);
 
                 const timeDiv = document.createElement('div');
                 timeDiv.className = 'response-time';
@@ -277,21 +305,32 @@ async function sendMessage() {
                 assistantTextDiv.appendChild(timeDiv);
             } else {
                 fullResponse += chunk;
-                assistantBubble.innerHTML = marked.parse(fullResponse);
+                if (!parsedMeta) {
+                    assistantBubble.innerHTML = marked.parse(fullResponse);
+                }
             }
 
             display.scrollTop = display.scrollHeight;
         }
 
-        const finalContent = fullResponse.trim();
+        const finalContent = parsedMeta
+            ? (parsedMeta.display || parsedMeta.text)
+            : fullResponse.trim();
         messageHistory.push({ role: 'assistant', content: finalContent });
 
-        // Auto-speak if toggled on
         if (ttsToggle.checked) {
-            speakText(finalContent);
+            if (parsedMeta) {
+                speakText(null, {
+                    text: parsedMeta.text,
+                    emotion: parsedMeta.emotion,
+                    intensity: parsedMeta.intensity,
+                    raw: parsedMeta.raw || null,
+                });
+            } else {
+                speakText(finalContent);
+            }
         }
 
-        // Trigger VTS movement based on emotion
         triggerVTSForEmotion(finalContent);
 
     } catch (error) {
