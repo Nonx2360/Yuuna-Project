@@ -8,7 +8,7 @@ import uuid
 from flask import Flask, request, jsonify, render_template, Response
 from flask_cors import CORS
 from transformers import (
-    AutoModelForMultimodalLM,
+    AutoModelForImageTextToText,
     AutoProcessor,
     TextIteratorStreamer,
     BitsAndBytesConfig,
@@ -108,13 +108,20 @@ def load_yuna():
         except Exception as e:
             print(f"Warning: Could not initialize bitsandbytes: {e}")
 
-    model = AutoModelForMultimodalLM.from_pretrained(
-        BASE_MODEL_PATH,
-        quantization_config=bnb_config,
-        torch_dtype=TORCH_DTYPE,
-        device_map="auto" if DEVICE == "cuda" else None,
-        trust_remote_code=True,
-    )
+    try:
+        model = AutoModelForImageTextToText.from_pretrained(
+            BASE_MODEL_PATH,
+            quantization_config=bnb_config,
+            dtype=TORCH_DTYPE,
+            device_map="auto" if DEVICE == "cuda" else None,
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+        )
+    except Exception as e:
+        print(f"ERROR loading model: {e}")
+        import traceback
+        traceback.print_exc()
+        return
 
     if DEVICE == "cpu":
         model = model.to(DEVICE)

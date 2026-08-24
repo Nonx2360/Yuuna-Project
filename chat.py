@@ -1,5 +1,5 @@
 import torch
-from transformers import AutoModelForMultimodalLM, AutoProcessor
+from transformers import AutoModelForImageTextToText, AutoProcessor
 import os
 
 BASE_MODEL_PATH = r"C:\Users\Nonx2\Documents\Yuuna-Project\Models_Files\google-gemma-4-E4B-it"
@@ -36,11 +36,12 @@ def load_model():
     )
 
     print("[2/2] Loading model...")
-    model = AutoModelForMultimodalLM.from_pretrained(
+    model = AutoModelForImageTextToText.from_pretrained(
         BASE_MODEL_PATH,
-        torch_dtype=TORCH_DTYPE,
+        dtype=TORCH_DTYPE,
         device_map="auto" if torch.cuda.is_available() else None,
         trust_remote_code=True,
+        low_cpu_mem_usage=True,
     )
 
     if not torch.cuda.is_available():
