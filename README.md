@@ -115,6 +115,43 @@ python TTS-Start-here\test_parse.py
 
 ---
 
+## 🔊 TTS Map — How Yuuna's Voice Works
+
+The voice pipeline lives in two small modules: `tts/yuuna_reply.py` (text/emotion parsing) and `tts/qwen_handler.py` (synthesis). Here's the full data flow:
+
+```
+ GEMMA OUTPUT              PARSING LAYER                    STYLE INJECTION                 SYNTHESIS                 BROWSER
+ ════════════              ══════════════                   ═════════════════               ══════════                ════════
+ {"text": "...",    ──►   parse_gemma_output()      ──►   build_style_prompt()     ──►   generate_voice_clone  ──►  WAV bytes
+  "emotion":            (Pydantic YuunaReply,             "(speak cheerfully and           via Qwen3-TTS             via POST
+   "cheerful",           markdown-fence strip,             warmly, quite strongly)          model, cloned             /api/tts
+   "intensity": 0.9}     legacy [TAG] fallback)                                             from yuuna_ref
+```
+
+### Step by step
+
+1. **Structured reply** — Gemma is instructed to emit strict JSON (`text` / `emotion` / `intensity`). If it misbehaves, `parse_gemma_output()` degrades gracefully: embedded-JSON extraction → plain-text fallback with `emotion="neutral"`.
+2. **Emotion → style instruction** — Qwen3-TTS doesn't take enum tags; `build_style_prompt()` translates `"cheerful" @ 0.9` into a natural-language directive like *"speak cheerfully and warmly, quite strongly"* that gets prepended to the text.
+3. **Voice identity (built once)** — at startup, `QwenTTSHandler.load()` calls `create_voice_clone_prompt()` with:
+   - `yuuna_ref.wav` — a clean reference clip of the target voice
+   - its transcript — enables **ICL mode** (the model conditions on reference speech codes + text, not just a speaker embedding)
+
+   The resulting `VoiceClonePromptItem` (speaker embedding + reference codes) is cached and reused for every request.
+4. **Synthesis** — each request runs `generate_voice_clone(text=<styled text>, voice_clone_prompt=<cached>)`, returning a NumPy waveform at **24 kHz**, encoded to WAV bytes in memory (no temp files).
+5. **Delivery** — `/api/tts` streams the WAV back; `/api/tts/status` reports whether the engine finished loading. The same emotion also drives the avatar via the emotion→hotkey map (see table above).
+
+### Testing TTS standalone
+
+`TTS-Start-here/test_tts.py` exercises the whole chain **without Flask or the LLM** — it feeds three fake Gemma JSON replies (cheerful / shy / sad) through the parser, clones the voice from the reference clip, and writes sample WAVs to `TTS-Start-here/outputs/`:
+
+```powershell
+.\venv_tts\Scripts\python.exe TTS-Start-here\test_tts.py
+```
+
+> 💡 `venv_tts` is a dedicated environment for the TTS stack (`requirements-tts.txt`). For best speed install a CUDA build of torch in it — on CPU expect ~13x real-time generation time; on an RTX 4060 roughly real-time.
+
+---
+
 ## 📁 Project Structure
 
 ```
@@ -137,10 +174,12 @@ Yuuna-Project/
 │   └── recorder.py            # Microphone capture helpers
 │
 ├── TTS-Start-here/
-│   ├── yuuna_ref.wav          # Reference voice clip for cloning
+│   ├── refaudio.wav           # Reference voice clip for cloning
 │   ├── transcript-form-ref_audio.txt  # Transcript of the reference clip
 │   ├── plan.md                # Design notes for the TTS integration
-│   └── test_parse.py          # Offline test for the reply parser
+│   ├── test_parse.py          # Offline test for the reply parser (no models)
+│   ├── test_tts.py            # Standalone voice-cloning test (venv_tts)
+│   └── outputs/               # Generated sample WAVs from test_tts.py
 │
 ├── Models_Files/              # Local model weights (not committed)
 ├── templates/                 # index.html (chat UI), vts_test.html (VTS console)
