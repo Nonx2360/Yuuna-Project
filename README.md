@@ -120,24 +120,24 @@ python TTS-Start-here\test_parse.py
 The voice pipeline lives in two small modules: `tts/yuuna_reply.py` (text/emotion parsing) and `tts/qwen_handler.py` (synthesis). Here's the full data flow:
 
 ```
- GEMMA OUTPUT              PARSING LAYER                    STYLE INJECTION                 SYNTHESIS                 BROWSER
- ════════════              ══════════════                   ═════════════════               ══════════                ════════
- {"text": "...",    ──►   parse_gemma_output()      ──►   build_style_prompt()     ──►   generate_voice_clone  ──►  WAV bytes
-  "emotion":            (Pydantic YuunaReply,             "(speak cheerfully and           via Qwen3-TTS             via POST
-   "cheerful",           markdown-fence strip,             warmly, quite strongly)          model, cloned             /api/tts
-   "intensity": 0.9}     legacy [TAG] fallback)                                             from yuuna_ref
+ GEMMA OUTPUT              PARSING LAYER                    PROSODY HINT                 SYNTHESIS                 BROWSER
+ ════════════              ══════════════                   ════════════                 ══════════                ════════
+ {"text": "...",    ──►   parse_gemma_output()      ──►   apply_prosody_hint()  ──►   generate_voice_clone  ──►  WAV bytes
+  "emotion":            (Pydantic YuunaReply,             punctuation emphasis         via Qwen3-TTS             via POST
+   "cheerful",           markdown-fence strip,             only — never spoken          model, cloned             /api/tts
+   "intensity": 0.9}     legacy [TAG] fallback)            as words                     from refaudio.wav
 ```
 
 ### Step by step
 
 1. **Structured reply** — Gemma is instructed to emit strict JSON (`text` / `emotion` / `intensity`). If it misbehaves, `parse_gemma_output()` degrades gracefully: embedded-JSON extraction → plain-text fallback with `emotion="neutral"`.
-2. **Emotion → style instruction** — Qwen3-TTS doesn't take enum tags; `build_style_prompt()` translates `"cheerful" @ 0.9` into a natural-language directive like *"speak cheerfully and warmly, quite strongly"* that gets prepended to the text.
+2. **Emotion → delivery** — ⚠️ the **Base** model variant has *no instruct channel*: any style text you prepend (e.g. `(speak softly...)`) is **read aloud as words**. So instead, `apply_prosody_hint()` appends punctuation-level cues (`!` for excited/cheerful/annoyed, `...` for sad/shy/sleepy) that shape delivery without being spoken. The natural-language style strings from `build_style_prompt()` are kept for logging/future use with the VoiceDesign/CustomVoice model variants.
 3. **Voice identity (built once)** — at startup, `QwenTTSHandler.load()` calls `create_voice_clone_prompt()` with:
-   - `yuuna_ref.wav` — a clean reference clip of the target voice
+   - `refaudio.wav` — a clean reference clip of the target voice
    - its transcript — enables **ICL mode** (the model conditions on reference speech codes + text, not just a speaker embedding)
 
    The resulting `VoiceClonePromptItem` (speaker embedding + reference codes) is cached and reused for every request.
-4. **Synthesis** — each request runs `generate_voice_clone(text=<styled text>, voice_clone_prompt=<cached>)`, returning a NumPy waveform at **24 kHz**, encoded to WAV bytes in memory (no temp files).
+4. **Synthesis** — each request runs `generate_voice_clone(text=<hinted text>, voice_clone_prompt=<cached>)`, returning a NumPy waveform at **24 kHz**, encoded to WAV bytes in memory (no temp files).
 5. **Delivery** — `/api/tts` streams the WAV back; `/api/tts/status` reports whether the engine finished loading. The same emotion also drives the avatar via the emotion→hotkey map (see table above).
 
 ### Testing TTS standalone

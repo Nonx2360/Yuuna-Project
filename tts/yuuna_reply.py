@@ -72,6 +72,31 @@ def build_style_prompt(reply: YuunaReply) -> str:
     return base
 
 
+PROSODY_HINTS = {
+    "excited": "!",
+    "cheerful": "!",
+    "annoyed": "!",
+    "sad": "...",
+    "shy": "...",
+    "sleepy": "...",
+    "neutral": "",
+}
+
+
+def apply_prosody_hint(reply: YuunaReply) -> str:
+    """Return reply.text with a punctuation-only prosody hint.
+
+    The Base TTS model speaks any prepended instruction aloud (it has no
+    instruct channel like the VoiceDesign/CustomVoice variants), so emotion
+    must be conveyed through punctuation instead of style text.
+    """
+    tail = PROSODY_HINTS.get(reply.emotion.lower(), "")
+    text = reply.text.rstrip()
+    if tail and not text.endswith(("!", "?", ".", "...")):
+        return f"{text}{tail}"
+    return reply.text
+
+
 def format_display_text(reply: YuunaReply) -> str:
     vts_tag = EMOTION_TO_VTS_TAG.get(reply.emotion.lower(), "CALM")
     return f"[{vts_tag}] {reply.text}"

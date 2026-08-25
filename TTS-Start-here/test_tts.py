@@ -17,7 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tts.yuuna_reply import parse_gemma_output, build_style_prompt  # noqa: E402
+from tts.yuuna_reply import parse_gemma_output, build_style_prompt, apply_prosody_hint  # noqa: E402
 
 import numpy as np  # noqa: E402
 import soundfile as sf  # noqa: E402
@@ -73,14 +73,14 @@ def main():
     for i, raw in enumerate(TEST_REPLIES_RAW, 1):
         reply = parse_gemma_output(raw)
         style = build_style_prompt(reply)
-        styled_text = f"({style}) {reply.text}"
+        spoken_text = apply_prosody_hint(reply)
         print(f"\n--- Sample {i}: emotion={reply.emotion} intensity={reply.intensity}")
-        print(f"    style prompt : {style}")
-        print(f"    speaking     : {reply.text}")
+        print(f"    style (info only, NOT spoken): {style}")
+        print(f"    speaking     : {spoken_text}")
 
         t0 = time.time()
         wavs, sr = model.generate_voice_clone(
-            text=styled_text,
+            text=spoken_text,
             language="Auto",
             voice_clone_prompt=prompt,
             non_streaming_mode=True,

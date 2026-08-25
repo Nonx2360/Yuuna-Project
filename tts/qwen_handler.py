@@ -7,7 +7,7 @@ import soundfile as sf
 import torch
 from qwen_tts import Qwen3TTSModel
 
-from tts.yuuna_reply import YuunaReply, build_style_prompt
+from tts.yuuna_reply import YuunaReply, apply_prosody_hint
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REF_AUDIO = os.path.join(BASE_DIR, "TTS-Start-here", "yuuna_ref.wav")
@@ -66,8 +66,9 @@ class QwenTTSHandler:
         self.ready = True
 
     def _styled_text(self, reply: YuunaReply) -> str:
-        style = build_style_prompt(reply)
-        return f"({style}) {reply.text}"
+        # Base model reads prepended style instructions aloud, so use
+        # punctuation-level prosody hints instead (see tts/yuuna_reply.py).
+        return apply_prosody_hint(reply)
 
     def generate_wav_bytes(self, reply: YuunaReply) -> Tuple[bytes, int]:
         if not self.ready or self.model is None:
