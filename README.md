@@ -133,10 +133,10 @@ The voice pipeline lives in two small modules: `tts/yuuna_reply.py` (text/emotio
 1. **Structured reply** — Gemma is instructed to emit strict JSON (`text` / `emotion` / `intensity`). If it misbehaves, `parse_gemma_output()` degrades gracefully: embedded-JSON extraction → plain-text fallback with `emotion="neutral"`.
 2. **Emotion → delivery** — ⚠️ the **Base** model variant has *no instruct channel*: any style text you prepend (e.g. `(speak softly...)`) is **read aloud as words**. So instead, `apply_prosody_hint()` appends punctuation-level cues (`!` for excited/cheerful/annoyed, `...` for sad/shy/sleepy) that shape delivery without being spoken. The natural-language style strings from `build_style_prompt()` are kept for logging/future use with the VoiceDesign/CustomVoice model variants.
 3. **Voice identity (built once)** — at startup, `QwenTTSHandler.load()` calls `create_voice_clone_prompt()` with:
-   - `refaudio.wav` — a clean reference clip of the target voice
-   - its transcript — enables **ICL mode** (the model conditions on reference speech codes + text, not just a speaker embedding)
+   - `refaudio_trim.wav` — a **clean 3–10 s slice** of `refaudio.wav` (mono 24 kHz). ⚠️ Don't feed long clips or clips ending in laughter: in ICL mode the model *continues from the end of the reference*, so a 65 s source ending in "あはははは！" made every generation start with inherited giggles.
+   - its matching transcript — enables **ICL mode** (the model conditions on reference speech codes + text, not just a speaker embedding)
 
-   The resulting `VoiceClonePromptItem` (speaker embedding + reference codes) is cached and reused for every request.
+   The resulting `VoiceClonePromptItem` (speaker embedding + reference codes) is cached and reused for every request. An `x_vector_only_mode=True` variant (speaker embedding only, no continuation) also exists as an artifact-free fallback.
 4. **Synthesis** — each request runs `generate_voice_clone(text=<hinted text>, voice_clone_prompt=<cached>)`, returning a NumPy waveform at **24 kHz**, encoded to WAV bytes in memory (no temp files).
 5. **Delivery** — `/api/tts` streams the WAV back; `/api/tts/status` reports whether the engine finished loading. The same emotion also drives the avatar via the emotion→hotkey map (see table above).
 
